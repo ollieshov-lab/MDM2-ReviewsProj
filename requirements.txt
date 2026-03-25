@@ -11,6 +11,7 @@ hdbscan==0.8.40
 pandas==2.2.2
 matplotlib==3.9.2
 nltk==3.9.4
+seaborn==0.13.2
 
 # Other dependencies (for notebook UI)
 jupyterlab==4.5.3
