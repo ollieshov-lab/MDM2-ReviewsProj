@@ -1,0 +1,58 @@
+Autumn (Sep-Nov)    122241
+Spring (Mar-May)    130483
+Summer (Jun-Aug)    142886
+Winter (Dec-Feb)    120128
+
+===== TOP TOPICS PER SEASON =====
+
+Winter:
+ Topic  Count                                   Name
+     0   3577                  0_wifi_wi_fi_internet
+     1   2976                1_noise_noisy_hear_loud
+     2   2892           2_london_central_tube_thames
+     3   1426            3_tea_coffee_kettle_machine
+     4   1410 4_breakfast_hotel_breakfasts_expensive
+     5   1286       5_hotel_negative_beautiful_staff
+     6   1038          6_amsterdam_tram_centre_train
+     7    996               7_parking_car_park_valet
+     8    833     8_negative_friendly_location_staff
+     9    829             9_pool_swimming_spa_indoor
+
+Spring:
+ Topic  Count                               Name
+     0   3592              0_wifi_fi_wi_internet
+     1   1674        1_shower_bed_comfy_bathroom
+     2   1538               2_card_booking_he_me
+     3   1324 3_breakfast_hotel_expensive_choice
+     4   1226   4_amsterdam_tram_centre_centraal
+     5   1089           5_pool_swimming_spa_swim
+     6   1074    6_negative_hotel_staff_friendly
+     7   1046          7_parking_car_park_garage
+     8   1040        8_coffee_tea_kettle_machine
+     9   1021  9_barcelona_metro_catalonia_sants
+
+Summer:
+ Topic  Count                                 Name
+     0   4896                0_wifi_fi_wi_internet
+     1   3132         1_pool_swimming_rooftop_roof
+     2   1901            2_air_conditioning_ac_hot
+     3   1714             3_card_booking_credit_me
+     4   1539      4_hotel_negative_staff_friendly
+     5   1528        5_paris_parisian_metro_french
+     6   1380      6_amsterdam_tram_central_centre
+     7   1318         7_barcelona_beach_pool_sants
+     8   1316            8_parking_car_park_garage
+     9   1143 9_breakfast_hotel_excellent_included
+
+Autumn:
+ Topic  Count                             Name
+     0   4509            0_wifi_wi_fi_internet
+     1   2340     1_london_central_tube_thames
+     2   1885    2_breakfast_hotel_choice_food
+     3   1492      3_tea_coffee_kettle_machine
+     4   1196     4_pool_swimming_rooftop_roof
+     5   1154    5_paris_french_parisian_metro
+     6    986        6_parking_car_park_garage
+     7    957  7_amsterdam_tram_centre_central
+     8    902        8_bed_beds_comfy_mattress
+     9    843 9_barcelona_catalonia_spain_pool
