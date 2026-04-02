@@ -1,8 +1,8 @@
 *.pdf
-*.png
 *.pyc
 *.log
 *.aux
+*.csv
 Datasets/
 .venv/
 __pycache__/

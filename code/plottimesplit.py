@@ -21,16 +21,34 @@ plt.rcParams.update({
 os.makedirs('plots', exist_ok=True)
 
 # --- Load and label topics ---
+def extract_keyword(name):
+    parts = name.split('_')
+    if len(parts) > 1 and parts[0].lstrip('-').isdigit():
+        # unsupervised format: "0_wifi_wi_fi_internet"
+        return parts[1]
+    else:
+        # zero-shot format: "wifi internet connection slow free"
+        return name.split()[0]  # just first word as keyword
+
+def extract_label(name):
+    parts = name.split('_')
+    if len(parts) > 1 and parts[0].lstrip('-').isdigit():
+        # unsupervised format
+        return ' / '.join(parts[1:4])
+    else:
+        # zero-shot format — use first 4 words
+        return ' / '.join(name.split()[:4])
+
 # --- Load and label topics ---
-MIN_COUNT = 50  # tune this — only topics with this many reviews are considered significant
+MIN_COUNT = 100
 
 infos = {}
 for season in seasons:
-    df = pd.read_csv(f'results/{season}_topics.csv')
+    df = pd.read_csv(f'results_zeroshot/{season}_topics.csv')
     df = df[df['Topic'] != -1].copy()
-    df = df[df['Count'] >= MIN_COUNT]  # ← significance filter
-    df['keyword'] = df['Name'].apply(lambda n: n.split('_')[1])
-    df['label']   = df['Name'].apply(lambda n: ' / '.join(n.split('_')[1:4]))
+    df = df[df['Count'] >= MIN_COUNT]
+    df['keyword'] = df['Name'].apply(extract_keyword)
+    df['label']   = df['Name'].apply(extract_label)
     infos[season] = df
     print(f"{season}: {len(df)} significant topics (>= {MIN_COUNT} reviews)")
 
