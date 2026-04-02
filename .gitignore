@@ -1,6 +1,7 @@
 *.pdf
 *.pyc
 *.log
+*.png
 *.aux
 *.csv
 Datasets/
