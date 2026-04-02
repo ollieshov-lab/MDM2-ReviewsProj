@@ -34,11 +34,11 @@ Dashboard requirements:
 
 ## 3. Statistical Analysis
 
-* Can we prove that guest profile/location/time are NOT independent of which topics are mentioned in a review
+* Can we prove that location/time are NOT independent of which topics are mentioned in a review
 
 Dashboard requirements:
 
-* For statistically significant influences: Input guest profile/location/time and produce likely topics mentioned
+* For statistically significant influences: Input location/time and produce likely topics mentioned
 
 ## Conclusion
 
