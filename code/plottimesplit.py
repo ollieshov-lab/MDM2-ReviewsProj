@@ -11,7 +11,7 @@ warnings.filterwarnings('ignore')
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SEASONS       = ['Winter', 'Spring', 'Summer', 'Autumn']
-DATA_DIR      = 'results_zeroshot'
+DATA_DIR      = 'results_zeroshot_seasons'
 OUT_DIR       = 'plots'
 
 PALETTE = {
