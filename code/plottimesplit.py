@@ -1,544 +1,791 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.gridspec import GridSpec
-from matplotlib.colors import LinearSegmentedColormap
-import matplotlib.ticker as mticker
-from itertools import combinations
-import warnings
-warnings.filterwarnings('ignore')
+import os
+import plotly.graph_objects as go
+import plotly.express as px
 
-# ── Config ────────────────────────────────────────────────────────────────────
-SEASONS       = ['Winter', 'Spring', 'Summer', 'Autumn']
-DATA_DIR      = 'results_zeroshot_seasons'
-OUT_DIR       = 'plots'
+# ── Constants ─────────────────────────────────────────────────────────────────
+ZERO_SHOT_MAJOR_TOPICS = [
+    "Staff Service",
+    "Room Comfort & Quality",
+    "Cleanliness",
+    "Location & Accessibility",
+    "Breakfast & Food",
+    "Bathroom & Shower Experience",
+    "Noise & Sleep Disturbance",
+    "Facilities & Amenities",
+    "Value for Money",
+    "Maintenance & Room Condition"
+]
 
-PALETTE = {
-    'Winter': '#7EB8D4',
+TRAVELER_TYPES = ['Couple', 'Solo traveler', 'Family with young children', 'Group']
+SEASONS        = ['Spring', 'Summer', 'Autumn', 'Winter']
+
+TRAVELER_COLOURS = {
+    'Couple':                      '#4575b4',
+    'Solo traveler':               '#d73027',
+    'Family with young children':  '#1a9850',
+    'Group':                       '#f46d43',
+}
+SEASON_COLOURS = {
     'Spring': '#85C88A',
     'Summer': '#F5A623',
     'Autumn': '#D4735E',
-}
-SENTIMENT_CMAP = LinearSegmentedColormap.from_list(
-    'sent', ['#D45E5E', '#F5F0E8', '#5EAD7A'], N=256
-)
-
-BG      = '#0F0F13'
-PANEL   = '#1A1A22'
-BORDER  = '#2A2A38'
-TEXT    = '#E8E4DC'
-SUBTEXT = '#8A8698'
-
-plt.rcParams.update({
-    'figure.facecolor':  BG,
-    'axes.facecolor':    PANEL,
-    'axes.edgecolor':    BORDER,
-    'axes.labelcolor':   TEXT,
-    'axes.titlecolor':   TEXT,
-    'xtick.color':       SUBTEXT,
-    'ytick.color':       SUBTEXT,
-    'text.color':        TEXT,
-    'grid.color':        BORDER,
-    'grid.linewidth':    0.5,
-    'font.family':       'monospace',
-    'axes.spines.top':   False,
-    'axes.spines.right': False,
-})
-
-import os
-os.makedirs(OUT_DIR, exist_ok=True)
-
-# ── Load Data ─────────────────────────────────────────────────────────────────
-dfs = {}
-for s in SEASONS:
-    path = f'{DATA_DIR}/{s}_topics.csv'
-    df   = pd.read_csv(path)
-    df   = df[df['Topic'] != -1].copy()          # drop noise
-    df['Net_Sentiment'] = pd.to_numeric(df['Net_Sentiment'], errors='coerce')
-    df['Count']         = pd.to_numeric(df['Count'], errors='coerce')
-    dfs[s] = df
-
-# ── Identify zero-shot matched topics (clean names, no leading digit_) ────────
-def is_zeroshot(name):
-    """Zero-shot names don't start with a digit."""
-    return not str(name).split('_')[0].isdigit()
-
-for s in SEASONS:
-    dfs[s]['is_zeroshot'] = dfs[s]['Name'].apply(is_zeroshot)
-
-zs = {s: dfs[s][dfs[s]['is_zeroshot']].set_index('Name') for s in SEASONS}
-
-# ── Shared / unique topic sets ────────────────────────────────────────────────
-topic_sets  = {s: set(zs[s].index) for s in SEASONS}
-all_topics  = set.union(*topic_sets.values())
-
-def season_mask(topic):
-    return tuple(topic in topic_sets[s] for s in SEASONS)
-
-topic_presence = pd.DataFrame(
-    {s: [t in topic_sets[s] for t in all_topics] for s in SEASONS},
-    index=list(all_topics)
-)
-topic_presence['n_seasons'] = topic_presence.sum(axis=1)
-
-shared_topics = topic_presence[topic_presence['n_seasons'] > 1].index.tolist()
-unique_topics = {
-    s: topic_presence[
-        (topic_presence[s] == True) & (topic_presence['n_seasons'] == 1)
-    ].index.tolist()
-    for s in SEASONS
+    'Winter': '#7EB8D4',
 }
 
+POS_THRESHOLD = 0.1
+NEG_THRESHOLD = -0.1
+DELTA_THRESHOLD = 0.05
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PLOT 1 — Shared topic count between every pair of seasons  (bar matrix)
-# ══════════════════════════════════════════════════════════════════════════════
-fig, axes = plt.subplots(2, 3, figsize=(14, 8), facecolor=BG)
-fig.suptitle('SHARED TOPICS BETWEEN SEASONS', fontsize=14,
-             fontweight='bold', color=TEXT, y=0.98)
+MONTH_NAMES  = {1:'Jan',2:'Feb',3:'Mar',4:'Apr',5:'May',6:'Jun',
+                7:'Jul',8:'Aug',9:'Sep',10:'Oct',11:'Nov',12:'Dec'}
 
-pairs = list(combinations(SEASONS, 2))
-for ax, (s1, s2) in zip(axes.flatten(), pairs):
-    shared = topic_sets[s1] & topic_sets[s2]
-    n      = len(shared)
-    ax.set_facecolor(PANEL)
-    ax.bar([f'{s1}\n∩\n{s2}'], [n],
-           color=[PALETTE[s1]], edgecolor=PALETTE[s2], linewidth=2, width=0.5)
-    ax.text(0, n + 0.3, str(n), ha='center', va='bottom',
-            fontsize=22, fontweight='bold', color=TEXT)
-    ax.set_ylim(0, max(n * 1.3, 5))
-    ax.set_title(f'{s1} ∩ {s2}', color=TEXT, fontsize=10)
-    ax.tick_params(bottom=False, labelbottom=False)
-    ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
-    ax.set_ylabel('# shared topics', color=SUBTEXT, fontsize=8)
-    for sp in ax.spines.values(): sp.set_edgecolor(BORDER)
-
-# last panel — all 4
-ax = axes.flatten()[-1]
-all_4 = set.intersection(*topic_sets.values())
-ax.set_facecolor(PANEL)
-ax.bar(['All 4\nSeasons'], [len(all_4)],
-       color='#A89ECC', edgecolor='#D4C9FF', linewidth=2, width=0.4)
-ax.text(0, len(all_4) + 0.3, str(len(all_4)), ha='center', va='bottom',
-        fontsize=22, fontweight='bold', color=TEXT)
-ax.set_ylim(0, max(len(all_4) * 1.3, 5))
-ax.set_title('All 4 Seasons', color=TEXT, fontsize=10)
-ax.tick_params(bottom=False, labelbottom=False)
-ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
-ax.set_ylabel('# shared topics', color=SUBTEXT, fontsize=8)
-for sp in ax.spines.values(): sp.set_edgecolor(BORDER)
-
-plt.tight_layout()
-plt.savefig(f'{OUT_DIR}/1_shared_topic_counts.png', dpi=150, bbox_inches='tight',
-            facecolor=BG)
-plt.close()
-print('✓ Plot 1 saved')
+os.makedirs('results_cross_segment/Plots', exist_ok=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PLOT 2 — Heatmap: shared topics × seasons, coloured by Net_Sentiment
+# LOAD DATA
 # ══════════════════════════════════════════════════════════════════════════════
-# Build matrix: rows = topics present in ≥2 seasons
-heat_rows = []
-for t in shared_topics:
-    row = {'Topic': t}
-    for s in SEASONS:
-        row[s] = zs[s].loc[t, 'Net_Sentiment'] if t in zs[s].index else np.nan
-    heat_rows.append(row)
 
-heat_df = (pd.DataFrame(heat_rows)
-             .set_index('Topic')
-             .sort_values('Winter', ascending=False))
+# ── Topic-level sentiment summaries ──────────────────────────────────────────
+tag_sentiment_frames = []
+for tt in TRAVELER_TYPES:
+    safe = tt.replace(' ', '_')
+    path = f'results_tags/{safe}_Topic_Sentiment.csv'
+    if os.path.exists(path):
+        tag_sentiment_frames.append(pd.read_csv(path))
+    else:
+        print(f'  WARNING: missing {path}')
 
-# Limit to top 40 by mean sentiment magnitude for readability
-if len(heat_df) > 40:
-    heat_df = heat_df.loc[heat_df.abs().mean(axis=1).nlargest(40).index]
+season_sentiment_frames = []
+for s in SEASONS:
+    path = f'results_zeroshot_seasons/{s}_Topic_Sentiment.csv'
+    if os.path.exists(path):
+        season_sentiment_frames.append(pd.read_csv(path))
+    else:
+        print(f'  WARNING: missing {path}')
 
-fig_h = max(8, len(heat_df) * 0.28)
-fig, ax = plt.subplots(figsize=(10, fig_h), facecolor=BG)
-ax.set_facecolor(BG)
+tags_sent    = pd.concat(tag_sentiment_frames,    ignore_index=True)
+seasons_sent = pd.concat(season_sentiment_frames, ignore_index=True)
 
-im = ax.imshow(heat_df.values, cmap=SENTIMENT_CMAP,
-               aspect='auto', vmin=-1, vmax=1)
+# Filter to only the 10 canonical topics
+tags_sent    = tags_sent[tags_sent['Semantic_Label'].isin(ZERO_SHOT_MAJOR_TOPICS)]
+seasons_sent = seasons_sent[seasons_sent['Semantic_Label'].isin(ZERO_SHOT_MAJOR_TOPICS)]
 
-ax.set_xticks(range(4))
-ax.set_xticklabels(SEASONS, fontsize=11, fontweight='bold')
-for i, s in enumerate(SEASONS):
-    ax.get_xticklabels()[i].set_color(PALETTE[s])
-
-ax.set_yticks(range(len(heat_df)))
-ax.set_yticklabels(heat_df.index, fontsize=7.5, color=TEXT)
-ax.tick_params(length=0)
-
-# cell values
-for r in range(len(heat_df)):
-    for c in range(4):
-        v = heat_df.values[r, c]
-        if not np.isnan(v):
-            ax.text(c, r, f'{v:+.2f}', ha='center', va='center',
-                    fontsize=6.5,
-                    color='#0F0F13' if abs(v) > 0.3 else TEXT)
-
-cbar = plt.colorbar(im, ax=ax, fraction=0.02, pad=0.02)
-cbar.ax.yaxis.set_tick_params(color=SUBTEXT)
-cbar.set_label('Net Sentiment  (pos − neg)', color=SUBTEXT, fontsize=9)
-
-ax.set_title('SHARED TOPICS — NET SENTIMENT BY SEASON\n'
-             '(topics present in ≥ 2 seasons, top 40 by magnitude)',
-             color=TEXT, fontsize=12, fontweight='bold', pad=12)
-
-plt.tight_layout()
-plt.savefig(f'{OUT_DIR}/2_shared_sentiment_heatmap.png', dpi=150,
-            bbox_inches='tight', facecolor=BG)
-plt.close()
-print('✓ Plot 2 saved')
+print(f'Loaded tags_sent:    {len(tags_sent):,} rows')
+print(f'Loaded seasons_sent: {len(seasons_sent):,} rows')
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PLOT 3 — Line plot: how shared-topic sentiment shifts across seasons
-# ══════════════════════════════════════════════════════════════════════════════
-# Pick topics present in all 4 seasons with meaningful sentiment variance
-all4_topics = topic_presence[topic_presence['n_seasons'] == 4].index.tolist()
+# ── Fragment-level document info ──────────────────────────────────────────────
+tag_doc_frames = []
+for tt in TRAVELER_TYPES:
+    safe = tt.replace(' ', '_')
+    path = f'results_tags/{safe}_Document_Info.csv'
+    if os.path.exists(path):
+        tag_doc_frames.append(pd.read_csv(path))
+    else:
+        print(f'  WARNING: missing {path}')
 
-sent_matrix = {}
-for t in all4_topics:
-    vals = [zs[s].loc[t, 'Net_Sentiment'] if t in zs[s].index else np.nan
-            for s in SEASONS]
-    sent_matrix[t] = vals
+season_doc_frames = []
+for s in SEASONS:
+    path = f'results_zeroshot_seasons/{s}_Document_Info.csv'
+    if os.path.exists(path):
+        season_doc_frames.append(pd.read_csv(path))
+    else:
+        print(f'  WARNING: missing {path}')
 
-sent_4 = pd.DataFrame(sent_matrix, index=SEASONS).T
-sent_4['variance'] = sent_4.var(axis=1)
-top_var = sent_4.nlargest(min(15, len(sent_4)), 'variance').drop(columns='variance')
+tags_doc    = pd.concat(tag_doc_frames,    ignore_index=True)
+seasons_doc = pd.concat(season_doc_frames, ignore_index=True)
 
-fig, ax = plt.subplots(figsize=(13, 7), facecolor=BG)
-ax.set_facecolor(PANEL)
+# Keep only scored, non-outlier fragments within the 10 topics
+tags_doc = tags_doc[
+    (tags_doc['Topic'] != -1) &
+    (tags_doc['Semantic_Label'].isin(ZERO_SHOT_MAJOR_TOPICS)) &
+    (tags_doc['Sentiment_Score'].notna())
+].copy()
 
-cmap_lines = plt.cm.get_cmap('tab20', len(top_var))
-x = np.arange(4)
+seasons_doc = seasons_doc[
+    (seasons_doc['Topic'] != -1) &
+    (seasons_doc['Semantic_Label'].isin(ZERO_SHOT_MAJOR_TOPICS)) &
+    (seasons_doc['Sentiment_Score'].notna())
+].copy()
 
-for i, (topic, row) in enumerate(top_var.iterrows()):
-    vals  = row.values.astype(float)
-    color = cmap_lines(i)
-    ax.plot(x, vals, 'o-', color=color, linewidth=1.8,
-            markersize=5, alpha=0.9)
-    # label at right end
-    last_valid = np.where(~np.isnan(vals))[0]
-    if len(last_valid):
-        end = last_valid[-1]
-        ax.annotate(topic[:45], xy=(end, vals[end]),
-                    xytext=(end + 0.08, vals[end]),
-                    fontsize=6.5, color=color, va='center',
-                    annotation_clip=False)
-
-ax.axhline(0, color=BORDER, linewidth=1, linestyle='--')
-ax.set_xticks(x)
-ax.set_xticklabels(SEASONS, fontsize=11)
-for i, s in enumerate(SEASONS):
-    ax.get_xticklabels()[i].set_color(PALETTE[s])
-
-ax.set_ylabel('Net Sentiment', color=SUBTEXT)
-ax.set_xlim(-0.2, 5.5)
-ax.set_title('SEASONAL SENTIMENT DRIFT\nTopics present all year — highest variance',
-             color=TEXT, fontsize=12, fontweight='bold', pad=10)
-ax.grid(axis='y', alpha=0.3)
-for sp in ax.spines.values(): sp.set_edgecolor(BORDER)
-
-plt.tight_layout()
-plt.savefig(f'{OUT_DIR}/3_shared_topic_sentiment_drift.png', dpi=150,
-            bbox_inches='tight', facecolor=BG)
-plt.close()
-print('✓ Plot 3 saved')
+print(f'Loaded tags_doc:    {len(tags_doc):,} fragments')
+print(f'Loaded seasons_doc: {len(seasons_doc):,} fragments')
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PLOT 4 — Unique topics per season: horizontal bars coloured by sentiment
+# SECTION 1 — TRAVELER TYPE ANALYSIS
 # ══════════════════════════════════════════════════════════════════════════════
-fig, axes = plt.subplots(1, 4, figsize=(18, 8), facecolor=BG)
-fig.suptitle('UNIQUE TOPICS PER SEASON — NET SENTIMENT',
-             fontsize=13, fontweight='bold', color=TEXT, y=1.01)
+print('\n── Section 1: Traveler Type Plots ──')
 
-for ax, s in zip(axes, SEASONS):
-    utopics = unique_topics[s]
-    if not utopics:
-        ax.set_visible(False)
+# 1a. Donut charts: topic distribution per traveler type ──────────────────────
+for tt in TRAVELER_TYPES:
+    sub = tags_doc[tags_doc['TravelerType'] == tt]
+    counts = (
+        sub.groupby('Semantic_Label').size()
+        .reset_index(name='Count')
+        .sort_values('Count', ascending=False)
+    )
+    fig = go.Figure(go.Pie(
+        labels=counts['Semantic_Label'],
+        values=counts['Count'],
+        hole=0.4,
+        textinfo='label+percent',
+        textposition='outside',
+        marker=dict(colors=px.colors.sequential.Blues[::-1])
+    ))
+    fig.update_layout(
+        title=dict(text=f'<b>Topic Distribution — {tt}</b>', x=0.5),
+        showlegend=False,
+        margin=dict(t=80, b=40, l=40, r=40)
+    )
+    safe = tt.replace(' ', '_')
+    fig.write_html(f'results_cross_segment/Plots/1a_Donut_{safe}.html')
+print('  ✓ 1a Donut charts (per traveler type)')
+
+
+# 1b. Heatmap: TravelerType × Topic mean sentiment ────────────────────────────
+pivot_tt = tags_sent.pivot_table(
+    index='TravelerType', columns='Semantic_Label', values='Mean_Sentiment', aggfunc='mean'
+).reindex(TRAVELER_TYPES)
+
+fig = px.imshow(
+    pivot_tt,
+    color_continuous_scale='RdBu', color_continuous_midpoint=0, aspect='auto',
+    title='<b>Mean Sentiment by Traveler Type and Topic</b>',
+    labels=dict(color='Sentiment')
+)
+fig.update_layout(
+    xaxis_title='Topic', yaxis_title='Traveler Type',
+    margin=dict(t=70, l=200, r=20, b=160)
+)
+fig.update_xaxes(tickangle=40)
+fig.write_html('results_cross_segment/Plots/1b_Heatmap_TravelerType_Topic.html')
+print('  ✓ 1b Heatmap TravelerType × Topic')
+
+
+# 1c. Bar chart per topic: traveler types ranked by sentiment ─────────────────
+os.makedirs('results_cross_segment/Plots/PerTopic_Tags', exist_ok=True)
+for topic in ZERO_SHOT_MAJOR_TOPICS:
+    sub = tags_sent[tags_sent['Semantic_Label'] == topic].sort_values('Mean_Sentiment')
+    if sub.empty:
         continue
-
-    sub = zs[s].loc[[t for t in utopics if t in zs[s].index]].copy()
-    sub = sub.sort_values('Net_Sentiment')
-
-    colors = [SENTIMENT_CMAP((v + 1) / 2) for v in sub['Net_Sentiment']]
-    ax.set_facecolor(PANEL)
-    bars = ax.barh(range(len(sub)), sub['Net_Sentiment'],
-                   color=colors, edgecolor='none', height=0.7)
-
-    ax.set_yticks(range(len(sub)))
-    ax.set_yticklabels(sub.index, fontsize=7, color=TEXT)
-    ax.axvline(0, color=BORDER, linewidth=1)
-    ax.set_xlabel('Net Sentiment', color=SUBTEXT, fontsize=8)
-    ax.set_title(s, color=PALETTE[s], fontsize=13, fontweight='bold')
-    ax.set_xlim(-1, 1)
-    ax.grid(axis='x', alpha=0.25)
-    for sp in ax.spines.values(): sp.set_edgecolor(BORDER)
-
-plt.tight_layout()
-plt.savefig(f'{OUT_DIR}/4_unique_topics_sentiment.png', dpi=150,
-            bbox_inches='tight', facecolor=BG)
-plt.close()
-print('✓ Plot 4 saved')
+    colors = [TRAVELER_COLOURS.get(t, '#888') for t in sub['TravelerType']]
+    fig = go.Figure(go.Bar(
+        x=sub['Mean_Sentiment'], y=sub['TravelerType'], orientation='h',
+        marker_color=colors,
+        customdata=sub[['Fragment_Count', 'Mean_Sentiment']].values,
+        hovertemplate='<b>%{y}</b><br>Sentiment: %{customdata[1]:.3f}<br>'
+                      'Fragments: %{customdata[0]}<extra></extra>'
+    ))
+    fig.add_vline(x=0, line_dash='dash', opacity=0.4)
+    fig.update_layout(
+        title=f'<b>{topic}</b>: Sentiment by Traveler Type',
+        xaxis_title='Mean Sentiment (-1 to +1)', xaxis=dict(range=[-1, 1]),
+        margin=dict(t=70, l=220, r=20, b=50), height=300
+    )
+    safe = topic.replace(' ', '_').replace('/', '_').replace('&', 'and')
+    fig.write_html(f'results_cross_segment/Plots/PerTopic_Tags/1c_{safe}_TravelerType.html')
+print('  ✓ 1c Bar charts per topic (traveler type ranking)')
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PLOT 5 — Bubble chart: topic volume vs sentiment (all zeroshot topics)
-# ══════════════════════════════════════════════════════════════════════════════
-fig, axes = plt.subplots(2, 2, figsize=(14, 10), facecolor=BG)
-fig.suptitle('TOPIC VOLUME vs. SENTIMENT', fontsize=13,
-             fontweight='bold', color=TEXT)
-
-for ax, s in zip(axes.flatten(), SEASONS):
-    df_s = zs[s].copy().reset_index()
-    df_s = df_s.dropna(subset=['Net_Sentiment', 'Count'])
-
-    sizes  = (df_s['Count'] / df_s['Count'].max()) * 800 + 20
-    colors = [SENTIMENT_CMAP((v + 1) / 2) for v in df_s['Net_Sentiment']]
-
-    ax.set_facecolor(PANEL)
-    sc = ax.scatter(df_s.index, df_s['Net_Sentiment'],
-                    s=sizes, c=colors, alpha=0.75, edgecolors='none')
-
-    # label top 5 by count
-    top5 = df_s.nlargest(5, 'Count')
-    for _, row in top5.iterrows():
-        ax.annotate(row['Name'][:30],
-                    xy=(row.name, row['Net_Sentiment']),
-                    xytext=(3, 3), textcoords='offset points',
-                    fontsize=6, color=TEXT, alpha=0.85)
-
-    ax.axhline(0, color=BORDER, linewidth=1, linestyle='--')
-    ax.set_ylabel('Net Sentiment', color=SUBTEXT, fontsize=8)
-    ax.set_xlabel('Topic index', color=SUBTEXT, fontsize=8)
-    ax.set_title(s, color=PALETTE[s], fontsize=11, fontweight='bold')
-    ax.set_ylim(-1.1, 1.1)
-    ax.grid(alpha=0.2)
-    for sp in ax.spines.values(): sp.set_edgecolor(BORDER)
-
-plt.tight_layout()
-plt.savefig(f'{OUT_DIR}/5_volume_vs_sentiment_bubbles.png', dpi=150,
-            bbox_inches='tight', facecolor=BG)
-plt.close()
-print('✓ Plot 5 saved')
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PLOT 6 — Top 10 most positive & negative topics across all seasons combined
-# ══════════════════════════════════════════════════════════════════════════════
-all_zs = pd.concat(
-    [zs[s].assign(Season=s).reset_index() for s in SEASONS],
-    ignore_index=True
+# 1d. Radar: all traveler types overlaid ──────────────────────────────────────
+all_topics = sorted(ZERO_SHOT_MAJOR_TOPICS)
+fig = go.Figure()
+for tt in TRAVELER_TYPES:
+    sub = tags_sent[tags_sent['TravelerType'] == tt]
+    vals = (
+        sub.set_index('Semantic_Label')['Mean_Sentiment']
+        .reindex(all_topics, fill_value=0)
+        .tolist()
+    )
+    fig.add_trace(go.Scatterpolar(
+        r=vals + [vals[0]], theta=all_topics + [all_topics[0]],
+        name=tt, line=dict(color=TRAVELER_COLOURS[tt]),
+        fill='toself', opacity=0.5
+    ))
+fig.update_layout(
+    polar=dict(radialaxis=dict(visible=True, range=[-1, 1])),
+    title=dict(text='<b>Topic Sentiment Radar — All Traveler Types</b>', x=0.5),
+    legend=dict(orientation='h', yanchor='bottom', y=-0.3),
+    margin=dict(t=80, l=60, r=20, b=80)
 )
-# average sentiment per topic name across seasons
-topic_avg = (all_zs.groupby('Name')
-               .agg(Avg_Sentiment=('Net_Sentiment', 'mean'),
-                    Total_Count=('Count', 'sum'))
-               .dropna()
-               .sort_values('Avg_Sentiment'))
-
-top_neg  = topic_avg.head(10)
-top_pos  = topic_avg.tail(10).iloc[::-1]
-
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6), facecolor=BG)
-fig.suptitle('TOP 10 MOST POSITIVE & NEGATIVE TOPICS (all seasons combined)',
-             fontsize=12, fontweight='bold', color=TEXT)
-
-for ax, sub, title, cval in [
-    (ax1, top_neg, 'Most Negative', '#D45E5E'),
-    (ax2, top_pos, 'Most Positive', '#5EAD7A'),
-]:
-    ax.set_facecolor(PANEL)
-    bars = ax.barh(range(len(sub)), sub['Avg_Sentiment'],
-                   color=cval, alpha=0.85, edgecolor='none', height=0.65)
-    ax.set_yticks(range(len(sub)))
-    ax.set_yticklabels(sub.index, fontsize=8, color=TEXT)
-    ax.axvline(0, color=BORDER, linewidth=1)
-    ax.set_xlabel('Avg Net Sentiment', color=SUBTEXT, fontsize=9)
-    ax.set_title(title, color=cval, fontsize=11, fontweight='bold')
-    ax.set_xlim(-1, 1)
-    ax.grid(axis='x', alpha=0.25)
-    for bar, val in zip(bars, sub['Avg_Sentiment']):
-        ax.text(val + (0.02 if val >= 0 else -0.02),
-                bar.get_y() + bar.get_height() / 2,
-                f'{val:+.2f}', va='center',
-                ha='left' if val >= 0 else 'right',
-                fontsize=8, color=TEXT)
-    for sp in ax.spines.values(): sp.set_edgecolor(BORDER)
-
-plt.tight_layout()
-plt.savefig(f'{OUT_DIR}/6_top_positive_negative_topics.png', dpi=150,
-            bbox_inches='tight', facecolor=BG)
-plt.close()
-print('✓ Plot 6 saved')
+fig.write_html('results_cross_segment/Plots/1d_Radar_AllTravelerTypes.html')
+print('  ✓ 1d Radar all traveler types')
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PLOT 7 — Stacked bar: sentiment label distribution per season
-# ══════════════════════════════════════════════════════════════════════════════
-sent_counts = {}
-for s in SEASONS:
-    vc = dfs[s]['Sentiment'].value_counts()
-    sent_counts[s] = {
+# 1e. Delta heatmap: each traveler type vs overall average ────────────────────
+overall_tag_avg = (
+    tags_sent.groupby('Semantic_Label')['Mean_Sentiment']
+    .mean()
+    .rename('Overall_Mean')
+)
+tags_sent_delta = tags_sent.merge(overall_tag_avg, on='Semantic_Label', how='left')
+tags_sent_delta['Delta_vs_Overall'] = tags_sent_delta['Mean_Sentiment'] - tags_sent_delta['Overall_Mean']
+
+pivot_tt_delta = tags_sent_delta.pivot_table(
+    index='TravelerType', columns='Semantic_Label', values='Delta_vs_Overall', aggfunc='mean'
+).reindex(TRAVELER_TYPES)
+
+fig = px.imshow(
+    pivot_tt_delta,
+    color_continuous_scale='RdBu', color_continuous_midpoint=0, aspect='auto',
+    title=('<b>Traveler Type vs Overall Average (Delta Sentiment)</b><br>'
+           '<sup>Blue = above overall average | Red = below overall average</sup>'),
+    labels=dict(color='Delta')
+)
+fig.update_layout(
+    xaxis_title='Topic', yaxis_title='Traveler Type',
+    margin=dict(t=90, l=200, r=20, b=160)
+)
+fig.update_xaxes(tickangle=40)
+fig.write_html('results_cross_segment/Plots/1e_Delta_TravelerType_vs_Overall.html')
+print('  ✓ 1e Delta heatmap traveler type vs overall')
+
+
+# 1f. Stacked bar: sentiment label distribution across traveler types ─────────
+def score_to_label(s):
+    if s > POS_THRESHOLD:  return 'Positive'
+    if s < NEG_THRESHOLD:  return 'Negative'
+    return 'Neutral'
+
+tags_doc['Sent_Label'] = tags_doc['Sentiment_Score'].apply(score_to_label)
+
+sent_counts_tt = {}
+for tt in TRAVELER_TYPES:
+    vc = tags_doc[tags_doc['TravelerType'] == tt]['Sent_Label'].value_counts()
+    sent_counts_tt[tt] = {
         'Positive': vc.get('Positive', 0),
-        'Neutral':  vc.get('Neutral', 0),
+        'Neutral':  vc.get('Neutral',  0),
         'Negative': vc.get('Negative', 0),
     }
 
-sc_df = pd.DataFrame(sent_counts).T
+bar_spec = [('Positive', '#4575b4'), ('Neutral', '#888'), ('Negative', '#d73027')]
+fig = go.Figure()
+for label, color in bar_spec:
+    fig.add_trace(go.Bar(
+        x=TRAVELER_TYPES,
+        y=[sent_counts_tt[tt][label] for tt in TRAVELER_TYPES],
+        name=label, marker_color=color, opacity=0.85,
+        text=[f"{sent_counts_tt[tt][label]:,}" for tt in TRAVELER_TYPES],
+        textposition='inside', insidetextanchor='middle',
+    ))
+fig.update_layout(
+    barmode='stack',
+    title=dict(text=f'<b>Sentiment Distribution Across Traveler Types</b><br>'
+                    f'<sup>Threshold ±{POS_THRESHOLD}</sup>'),
+    xaxis_title='Traveler Type', yaxis_title='Number of Fragments',
+    height=520, margin=dict(t=80, l=60, r=20, b=80),
+    legend=dict(orientation='h', yanchor='bottom', y=-0.2)
+)
+fig.write_html('results_cross_segment/Plots/1f_StackedBar_SentimentDist_TravelerType.html')
+print('  ✓ 1f Stacked bar sentiment distribution (traveler types)')
 
-fig, ax = plt.subplots(figsize=(9, 5), facecolor=BG)
-ax.set_facecolor(PANEL)
 
-bottoms = np.zeros(4)
-colors_s = ['#5EAD7A', '#8A8698', '#D45E5E']
-labels_s = ['Positive', 'Neutral', 'Negative']
-
-x = np.arange(4)
-for col, color, label in zip(['Positive', 'Neutral', 'Negative'],
-                               colors_s, labels_s):
-    vals = sc_df[col].values
-    ax.bar(x, vals, bottom=bottoms, color=color, label=label,
-           edgecolor=BG, linewidth=0.5, width=0.55)
-    for xi, (v, b) in enumerate(zip(vals, bottoms)):
-        if v > 0:
-            ax.text(xi, b + v / 2, str(v), ha='center', va='center',
-                    fontsize=9, fontweight='bold', color=BG)
-    bottoms += vals
-
-ax.set_xticks(x)
-ax.set_xticklabels(SEASONS, fontsize=11)
-for i, s in enumerate(SEASONS):
-    ax.get_xticklabels()[i].set_color(PALETTE[s])
-
-ax.set_ylabel('Number of topics', color=SUBTEXT)
-ax.set_title('SENTIMENT LABEL DISTRIBUTION ACROSS SEASONS',
-             color=TEXT, fontsize=12, fontweight='bold', pad=10)
-ax.legend(loc='upper right', framealpha=0.15, labelcolor=TEXT,
-          edgecolor=BORDER, fontsize=9)
-ax.grid(axis='y', alpha=0.2)
-for sp in ax.spines.values(): sp.set_edgecolor(BORDER)
-
-plt.tight_layout()
-plt.savefig(f'{OUT_DIR}/7_sentiment_label_distribution.png', dpi=150,
-            bbox_inches='tight', facecolor=BG)
-plt.close()
-print('✓ Plot 7 saved')
+# 1g. Grouped bar: fragment count per topic per traveler type ─────────────────
+fig = px.bar(
+    tags_sent.sort_values(['Semantic_Label', 'TravelerType']),
+    x='Semantic_Label', y='Fragment_Count', color='TravelerType',
+    barmode='group',
+    color_discrete_map=TRAVELER_COLOURS,
+    title='<b>Fragment Count per Topic by Traveler Type</b>',
+    labels={'Fragment_Count': 'Scored Fragments', 'Semantic_Label': 'Topic', 'TravelerType': 'Traveler Type'}
+)
+fig.update_layout(
+    xaxis_tickangle=40,
+    margin=dict(t=70, l=60, r=20, b=160), height=520
+)
+fig.write_html('results_cross_segment/Plots/1g_FragmentCount_TravelerType.html')
+print('  ✓ 1g Fragment count per topic (traveler type)')
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PLOT 8 — Radar chart: avg sentiment by topic CATEGORY per season
+# SECTION 2 — SEASONAL ANALYSIS
 # ══════════════════════════════════════════════════════════════════════════════
-CATEGORIES = {
-    'Location':    ['proximity', 'city centre', 'metro', 'tram', 'train station',
-                    'tube station', 'airport', 'taxi', 'transport', 'walking distance'],
-    'Room':        ['room size', 'bed', 'mattress', 'pillow', 'bathroom',
-                    'shower', 'air conditioning', 'soundproof', 'view', 'cleanliness',
-                    'decor', 'lighting', 'minibar', 'coffee machine', 'towel',
-                    'fridge', 'TV', 'Wi-Fi', 'balcony'],
-    'Staff':       ['staff', 'reception', 'concierge', 'check-in', 'check-out',
-                    'housekeeping', 'customer service', 'language'],
-    'Food':        ['breakfast', 'buffet', 'restaurant', 'bar', 'cocktail',
-                    'coffee', 'room service', 'gluten', 'vegetarian', 'juice'],
-    'Facilities':  ['pool', 'spa', 'gym', 'sauna', 'lounge', 'rooftop',
-                    'bike', 'laundry', 'parking', 'luggage'],
-    'Value':       ['value for money', 'overpriced', 'expensive', 'city tax', 'charges'],
-    'Issues':      ['fire alarm', 'noise', 'construction', 'lift', 'key card',
-                    'theft', 'mould', 'insects', 'smell', 'plumbing', 'cold room',
-                    'overheating', 'renovation'],
-}
+print('\n── Section 2: Season Plots ──')
 
-def assign_category(name):
-    nl = name.lower()
-    for cat, kws in CATEGORIES.items():
-        if any(kw in nl for kw in kws):
-            return cat
-    return 'Other'
-
-all_zs['Category'] = all_zs['Name'].apply(assign_category)
-
-cat_season = (all_zs.groupby(['Season', 'Category'])['Net_Sentiment']
-                .mean().unstack('Category').reindex(SEASONS))
-
-cats    = list(CATEGORIES.keys())
-n_cats  = len(cats)
-angles  = np.linspace(0, 2 * np.pi, n_cats, endpoint=False).tolist()
-angles += angles[:1]
-
-fig, ax = plt.subplots(figsize=(9, 9), subplot_kw=dict(polar=True), facecolor=BG)
-ax.set_facecolor(BG)
-ax.spines['polar'].set_edgecolor(BORDER)
-
+# 2a. Donut charts: topic distribution per season ─────────────────────────────
 for s in SEASONS:
-    vals = [cat_season.loc[s, c] if c in cat_season.columns else 0 for c in cats]
-    vals = [v if not np.isnan(v) else 0 for v in vals]
-    vals += vals[:1]
-    ax.plot(angles, vals, 'o-', linewidth=2, color=PALETTE[s],
-            label=s, markersize=4)
-    ax.fill(angles, vals, alpha=0.08, color=PALETTE[s])
+    sub = seasons_doc[seasons_doc['Season'] == s]
+    counts = (
+        sub.groupby('Semantic_Label').size()
+        .reset_index(name='Count')
+        .sort_values('Count', ascending=False)
+    )
+    fig = go.Figure(go.Pie(
+        labels=counts['Semantic_Label'],
+        values=counts['Count'],
+        hole=0.4,
+        textinfo='label+percent',
+        textposition='outside',
+        marker=dict(colors=px.colors.sequential.Blues[::-1])
+    ))
+    fig.update_layout(
+        title=dict(text=f'<b>Topic Distribution — {s}</b>', x=0.5),
+        showlegend=False,
+        margin=dict(t=80, b=40, l=40, r=40)
+    )
+    fig.write_html(f'results_cross_segment/Plots/2a_Donut_{s}.html')
+print('  ✓ 2a Donut charts (per season)')
 
-ax.set_xticks(angles[:-1])
-ax.set_xticklabels(cats, fontsize=10, color=TEXT)
-ax.set_ylim(-1, 1)
-ax.set_yticks([-0.5, 0, 0.5])
-ax.set_yticklabels(['-0.5', '0', '0.5'], fontsize=7, color=SUBTEXT)
-ax.yaxis.grid(True, color=BORDER, linewidth=0.5)
-ax.xaxis.grid(True, color=BORDER, linewidth=0.5)
 
-ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.15),
-          framealpha=0.1, edgecolor=BORDER, labelcolor=TEXT, fontsize=10)
-ax.set_title('AVG SENTIMENT BY TOPIC CATEGORY & SEASON',
-             color=TEXT, fontsize=12, fontweight='bold', pad=20)
+# 2b. Heatmap: Season × Topic mean sentiment ──────────────────────────────────
+pivot_s = seasons_sent.pivot_table(
+    index='Season', columns='Semantic_Label', values='Mean_Sentiment', aggfunc='mean'
+).reindex(SEASONS)
 
-plt.tight_layout()
-plt.savefig(f'{OUT_DIR}/8_radar_category_sentiment.png', dpi=150,
-            bbox_inches='tight', facecolor=BG)
-plt.close()
-print('✓ Plot 8 saved')
+fig = px.imshow(
+    pivot_s,
+    color_continuous_scale='RdBu', color_continuous_midpoint=0, aspect='auto',
+    title='<b>Mean Sentiment by Season and Topic</b>',
+    labels=dict(color='Sentiment')
+)
+fig.update_layout(
+    xaxis_title='Topic', yaxis_title='Season',
+    margin=dict(t=70, l=100, r=20, b=160)
+)
+fig.update_xaxes(tickangle=40)
+fig.write_html('results_cross_segment/Plots/2b_Heatmap_Season_Topic.html')
+print('  ✓ 2b Heatmap Season × Topic')
+
+
+# 2c. Bar chart per topic: seasons ranked by sentiment ────────────────────────
+os.makedirs('results_cross_segment/Plots/PerTopic_Seasons', exist_ok=True)
+for topic in ZERO_SHOT_MAJOR_TOPICS:
+    sub = seasons_sent[seasons_sent['Semantic_Label'] == topic].sort_values('Mean_Sentiment')
+    if sub.empty:
+        continue
+    colors = [SEASON_COLOURS.get(s, '#888') for s in sub['Season']]
+    fig = go.Figure(go.Bar(
+        x=sub['Mean_Sentiment'], y=sub['Season'], orientation='h',
+        marker_color=colors,
+        customdata=sub[['Fragment_Count', 'Mean_Sentiment']].values,
+        hovertemplate='<b>%{y}</b><br>Sentiment: %{customdata[1]:.3f}<br>'
+                      'Fragments: %{customdata[0]}<extra></extra>'
+    ))
+    fig.add_vline(x=0, line_dash='dash', opacity=0.4)
+    fig.update_layout(
+        title=f'<b>{topic}</b>: Sentiment by Season',
+        xaxis_title='Mean Sentiment (-1 to +1)', xaxis=dict(range=[-1, 1]),
+        margin=dict(t=70, l=100, r=20, b=50), height=300
+    )
+    safe = topic.replace(' ', '_').replace('/', '_').replace('&', 'and')
+    fig.write_html(f'results_cross_segment/Plots/PerTopic_Seasons/2c_{safe}_Season.html')
+print('  ✓ 2c Bar charts per topic (season ranking)')
+
+
+# 2d. Radar: all seasons overlaid ─────────────────────────────────────────────
+fig = go.Figure()
+for s in SEASONS:
+    sub = seasons_sent[seasons_sent['Season'] == s]
+    vals = (
+        sub.set_index('Semantic_Label')['Mean_Sentiment']
+        .reindex(all_topics, fill_value=0)
+        .tolist()
+    )
+    fig.add_trace(go.Scatterpolar(
+        r=vals + [vals[0]], theta=all_topics + [all_topics[0]],
+        name=s, line=dict(color=SEASON_COLOURS[s]),
+        fill='toself', opacity=0.5
+    ))
+fig.update_layout(
+    polar=dict(radialaxis=dict(visible=True, range=[-1, 1])),
+    title=dict(text='<b>Topic Sentiment Radar — All Seasons</b>', x=0.5),
+    legend=dict(orientation='h', yanchor='bottom', y=-0.3),
+    margin=dict(t=80, l=60, r=20, b=80)
+)
+fig.write_html('results_cross_segment/Plots/2d_Radar_AllSeasons.html')
+print('  ✓ 2d Radar all seasons')
+
+
+# 2e. Delta heatmap: each season vs overall average ───────────────────────────
+overall_season_avg = (
+    seasons_sent.groupby('Semantic_Label')['Mean_Sentiment']
+    .mean()
+    .rename('Overall_Mean')
+)
+seasons_sent_delta = seasons_sent.merge(overall_season_avg, on='Semantic_Label', how='left')
+seasons_sent_delta['Delta_vs_Overall'] = seasons_sent_delta['Mean_Sentiment'] - seasons_sent_delta['Overall_Mean']
+
+pivot_s_delta = seasons_sent_delta.pivot_table(
+    index='Season', columns='Semantic_Label', values='Delta_vs_Overall', aggfunc='mean'
+).reindex(SEASONS)
+
+fig = px.imshow(
+    pivot_s_delta,
+    color_continuous_scale='RdBu', color_continuous_midpoint=0, aspect='auto',
+    title=('<b>Season vs Overall Average (Delta Sentiment)</b><br>'
+           '<sup>Blue = above overall average | Red = below overall average</sup>'),
+    labels=dict(color='Delta')
+)
+fig.update_layout(
+    xaxis_title='Topic', yaxis_title='Season',
+    margin=dict(t=90, l=100, r=20, b=160)
+)
+fig.update_xaxes(tickangle=40)
+fig.write_html('results_cross_segment/Plots/2e_Delta_Season_vs_Overall.html')
+print('  ✓ 2e Delta heatmap season vs overall')
+
+
+# 2f. Stacked bar: sentiment label distribution across seasons ────────────────
+seasons_doc['Sent_Label'] = seasons_doc['Sentiment_Score'].apply(score_to_label)
+
+sent_counts_s = {}
+for s in SEASONS:
+    vc = seasons_doc[seasons_doc['Season'] == s]['Sent_Label'].value_counts()
+    sent_counts_s[s] = {
+        'Positive': vc.get('Positive', 0),
+        'Neutral':  vc.get('Neutral',  0),
+        'Negative': vc.get('Negative', 0),
+    }
+
+fig = go.Figure()
+for label, color in bar_spec:
+    fig.add_trace(go.Bar(
+        x=SEASONS,
+        y=[sent_counts_s[s][label] for s in SEASONS],
+        name=label, marker_color=color, opacity=0.85,
+        text=[f"{sent_counts_s[s][label]:,}" for s in SEASONS],
+        textposition='inside', insidetextanchor='middle',
+    ))
+fig.update_layout(
+    barmode='stack',
+    title=dict(text=f'<b>Sentiment Distribution Across Seasons</b><br>'
+                    f'<sup>Threshold ±{POS_THRESHOLD}</sup>'),
+    xaxis_title='Season', yaxis_title='Number of Fragments',
+    height=520, margin=dict(t=80, l=60, r=20, b=80),
+    legend=dict(orientation='h', yanchor='bottom', y=-0.2)
+)
+fig.write_html('results_cross_segment/Plots/2f_StackedBar_SentimentDist_Season.html')
+print('  ✓ 2f Stacked bar sentiment distribution (seasons)')
+
+
+# 2g. Fragment count per topic per season ─────────────────────────────────────
+fig = px.bar(
+    seasons_sent.sort_values(['Semantic_Label', 'Season']),
+    x='Semantic_Label', y='Fragment_Count', color='Season',
+    barmode='group',
+    color_discrete_map=SEASON_COLOURS,
+    title='<b>Fragment Count per Topic by Season</b>',
+    labels={'Fragment_Count': 'Scored Fragments', 'Semantic_Label': 'Topic', 'Season': 'Season'}
+)
+fig.update_layout(
+    xaxis_tickangle=40,
+    margin=dict(t=70, l=60, r=20, b=160), height=520
+)
+fig.write_html('results_cross_segment/Plots/2g_FragmentCount_Season.html')
+print('  ✓ 2g Fragment count per topic (season)')
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PLOT 9 — Review volume per topic (top 20) across seasons — grouped bar
+# SECTION 3 — CROSS-SEGMENT: TAGS × SEASONS
 # ══════════════════════════════════════════════════════════════════════════════
-top_by_vol = (all_zs.groupby('Name')['Count'].sum()
-                .nlargest(20).index.tolist())
+print('\n── Section 3: Cross-Segment Plots ──')
 
-vol_df = (all_zs[all_zs['Name'].isin(top_by_vol)]
-            .pivot_table(index='Name', columns='Season',
-                         values='Count', aggfunc='sum')
-            .reindex(columns=SEASONS)
-            .fillna(0))
-vol_df = vol_df.loc[vol_df.sum(axis=1).sort_values(ascending=False).index]
+# 3a. Side-by-side heatmap comparison: tags vs seasons for every topic ─────────
+# Normalise both to the same colour scale by combining into one figure with subplots
+from plotly.subplots import make_subplots
 
-x  = np.arange(len(vol_df))
-w  = 0.2
-fig, ax = plt.subplots(figsize=(16, 6), facecolor=BG)
-ax.set_facecolor(PANEL)
+fig = make_subplots(
+    rows=1, cols=2,
+    subplot_titles=('Traveler Type × Topic', 'Season × Topic'),
+    horizontal_spacing=0.12
+)
 
-for i, s in enumerate(SEASONS):
-    ax.bar(x + i * w, vol_df[s], width=w, color=PALETTE[s],
-           label=s, edgecolor='none', alpha=0.9)
+# Left: traveler type
+for i, tt in enumerate(TRAVELER_TYPES):
+    for j, topic in enumerate(all_topics):
+        val = pivot_tt.loc[tt, topic] if topic in pivot_tt.columns else np.nan
+        # We'll add as a heatmap trace below
 
-ax.set_xticks(x + 1.5 * w)
-ax.set_xticklabels(vol_df.index, rotation=35, ha='right', fontsize=8, color=TEXT)
-ax.set_ylabel('Review count', color=SUBTEXT)
-ax.set_title('TOP 20 TOPICS BY REVIEW VOLUME — SEASONAL BREAKDOWN',
-             color=TEXT, fontsize=12, fontweight='bold', pad=10)
-ax.legend(framealpha=0.1, edgecolor=BORDER, labelcolor=TEXT, fontsize=9)
-ax.grid(axis='y', alpha=0.2)
-for sp in ax.spines.values(): sp.set_edgecolor(BORDER)
+z_tt = pivot_tt.reindex(columns=all_topics).values
+z_s  = pivot_s.reindex(columns=all_topics).values
 
-plt.tight_layout()
-plt.savefig(f'{OUT_DIR}/9_top20_volume_by_season.png', dpi=150,
-            bbox_inches='tight', facecolor=BG)
-plt.close()
-print('✓ Plot 9 saved')
+vmax = max(np.nanmax(np.abs(z_tt)), np.nanmax(np.abs(z_s)))
+
+fig.add_trace(
+    go.Heatmap(
+        z=z_tt, x=all_topics, y=TRAVELER_TYPES,
+        colorscale='RdBu', zmid=0, zmin=-vmax, zmax=vmax,
+        colorbar=dict(x=0.44, len=0.9, title='Sentiment'),
+        showscale=True
+    ),
+    row=1, col=1
+)
+fig.add_trace(
+    go.Heatmap(
+        z=z_s, x=all_topics, y=SEASONS,
+        colorscale='RdBu', zmid=0, zmin=-vmax, zmax=vmax,
+        colorbar=dict(x=1.01, len=0.9, title='Sentiment'),
+        showscale=True
+    ),
+    row=1, col=2
+)
+fig.update_xaxes(tickangle=45)
+fig.update_layout(
+    title=dict(text='<b>Mean Sentiment Comparison: Traveler Types vs Seasons</b>', x=0.5),
+    height=420,
+    margin=dict(t=90, l=180, r=80, b=160)
+)
+fig.write_html('results_cross_segment/Plots/3a_SideBySide_Heatmap_Tags_vs_Seasons.html')
+print('  ✓ 3a Side-by-side heatmap tags vs seasons')
 
 
-print(f'\n✓ All 9 plots saved to ./{OUT_DIR}/')
+# 3b. Line chart: mean sentiment per topic — each traveler type as a line,
+#     seasons on x-axis (requires merging both doc tables) ────────────────────
+#     For each traveler type, we compute sentiment per season from the raw fragments
+#     by joining seasons_doc (has Season) with tags_doc (has TravelerType) via Person_id.
+
+# tags_doc has Person_id and TravelerType; seasons_doc has Person_id and Season
+# Merge on Person_id to get both dimensions at once
+cross_doc = tags_doc[['Person_id', 'TravelerType', 'Semantic_Label', 'Sentiment_Score']].merge(
+    seasons_doc[['Person_id', 'Season']].drop_duplicates(subset='Person_id'),
+    on='Person_id', how='inner'
+)
+
+cross_agg = (
+    cross_doc
+    .groupby(['TravelerType', 'Season', 'Semantic_Label'])
+    .agg(Mean_Sentiment=('Sentiment_Score', 'mean'), Fragment_Count=('Sentiment_Score', 'count'))
+    .reset_index()
+)
+cross_agg = cross_agg[
+    (cross_agg['Semantic_Label'].isin(ZERO_SHOT_MAJOR_TOPICS)) &
+    (cross_agg['Fragment_Count'] >= 3)
+]
+cross_agg['Season'] = pd.Categorical(cross_agg['Season'], categories=SEASONS, ordered=True)
+cross_agg = cross_agg.sort_values('Season')
+
+cross_agg.to_csv('results_cross_segment/cross_TravelerType_Season_Topic.csv', index=False)
+print(f'  Saved cross_agg: {len(cross_agg):,} rows')
+
+
+# 3b. Line: overall sentiment across seasons, one line per traveler type ───────
+overall_cross = (
+    cross_doc
+    .groupby(['TravelerType', 'Season'])
+    .agg(Mean_Sentiment=('Sentiment_Score', 'mean'))
+    .reset_index()
+)
+overall_cross['Season'] = pd.Categorical(overall_cross['Season'], categories=SEASONS, ordered=True)
+overall_cross = overall_cross.sort_values('Season')
+
+fig = px.line(
+    overall_cross, x='Season', y='Mean_Sentiment', color='TravelerType',
+    markers=True,
+    color_discrete_map=TRAVELER_COLOURS,
+    title='<b>Overall Sentiment Across Seasons by Traveler Type</b>',
+    labels={'Mean_Sentiment': 'Mean Sentiment (-1 to +1)', 'Season': 'Season'}
+)
+fig.add_hline(y=0, line_dash='dot', opacity=0.25)
+fig.update_layout(
+    yaxis=dict(range=[-1, 1]),
+    height=480, margin=dict(t=80, l=60, r=20, b=80),
+    legend=dict(orientation='h', yanchor='bottom', y=-0.25)
+)
+fig.write_html('results_cross_segment/Plots/3b_Line_Overall_TravelerType_by_Season.html')
+print('  ✓ 3b Line: overall sentiment by season × traveler type')
+
+
+# 3c. Heatmap per topic: Season (rows) × TravelerType (cols) ──────────────────
+os.makedirs('results_cross_segment/Plots/CrossTopic_Heatmaps', exist_ok=True)
+for topic in ZERO_SHOT_MAJOR_TOPICS:
+    sub = cross_agg[cross_agg['Semantic_Label'] == topic]
+    if sub.empty:
+        continue
+    pivot_cross = sub.pivot_table(
+        index='Season', columns='TravelerType', values='Mean_Sentiment', aggfunc='mean'
+    ).reindex(SEASONS)
+    pivot_cross = pivot_cross.reindex(columns=[c for c in TRAVELER_TYPES if c in pivot_cross.columns])
+
+    fig = px.imshow(
+        pivot_cross,
+        color_continuous_scale='RdBu', color_continuous_midpoint=0, aspect='auto',
+        title=f'<b>{topic}</b><br><sup>Season × Traveler Type</sup>',
+        labels=dict(color='Sentiment', x='Traveler Type', y='Season')
+    )
+    fig.update_layout(margin=dict(t=90, l=100, r=20, b=120), height=380)
+    fig.update_xaxes(tickangle=30)
+    safe = topic.replace(' ', '_').replace('/', '_').replace('&', 'and')
+    fig.write_html(f'results_cross_segment/Plots/CrossTopic_Heatmaps/3c_{safe}_Season_x_TravelerType.html')
+print('  ✓ 3c Heatmap per topic: Season × TravelerType')
+
+
+# 3d. Radar per topic: traveler types vs seasons on the same chart ─────────────
+#     One radar per topic showing all 8 segments (4 types + 4 seasons) ─────────
+os.makedirs('results_cross_segment/Plots/CrossRadar', exist_ok=True)
+for topic in ZERO_SHOT_MAJOR_TOPICS:
+    fig = go.Figure()
+    # Traveler types — overall sentiment per topic per traveler type
+    for tt in TRAVELER_TYPES:
+        row = tags_sent[(tags_sent['TravelerType'] == tt) & (tags_sent['Semantic_Label'] == topic)]
+        val = float(row['Mean_Sentiment'].values[0]) if not row.empty else 0
+        fig.add_trace(go.Scatterpolar(
+            r=[val, val], theta=[topic, topic],
+            name=tt, mode='markers',
+            marker=dict(color=TRAVELER_COLOURS[tt], size=14, symbol='circle'),
+            showlegend=True
+        ))
+    # Seasons
+    for s in SEASONS:
+        row = seasons_sent[(seasons_sent['Season'] == s) & (seasons_sent['Semantic_Label'] == topic)]
+        val = float(row['Mean_Sentiment'].values[0]) if not row.empty else 0
+        fig.add_trace(go.Scatterpolar(
+            r=[val, val], theta=[topic, topic],
+            name=s, mode='markers',
+            marker=dict(color=SEASON_COLOURS[s], size=14, symbol='diamond'),
+            showlegend=True
+        ))
+    fig.update_layout(
+        polar=dict(radialaxis=dict(visible=True, range=[-1, 1])),
+        title=dict(text=f'<b>{topic}</b><br><sup>Circles = Traveler Types | Diamonds = Seasons</sup>', x=0.5),
+        legend=dict(orientation='h', yanchor='bottom', y=-0.4),
+        margin=dict(t=90, l=60, r=20, b=100)
+    )
+    safe = topic.replace(' ', '_').replace('/', '_').replace('&', 'and')
+    fig.write_html(f'results_cross_segment/Plots/CrossRadar/3d_{safe}_AllSegments.html')
+print('  ✓ 3d Per-topic dot radar: all segments')
+
+
+# 3e. Full radar: all traveler types AND all seasons on one chart ──────────────
+fig = go.Figure()
+for tt in TRAVELER_TYPES:
+    sub = tags_sent[tags_sent['TravelerType'] == tt]
+    vals = sub.set_index('Semantic_Label')['Mean_Sentiment'].reindex(all_topics, fill_value=0).tolist()
+    fig.add_trace(go.Scatterpolar(
+        r=vals + [vals[0]], theta=all_topics + [all_topics[0]],
+        name=tt, line=dict(color=TRAVELER_COLOURS[tt], dash='solid'),
+        fill='none', opacity=0.8
+    ))
+for s in SEASONS:
+    sub = seasons_sent[seasons_sent['Season'] == s]
+    vals = sub.set_index('Semantic_Label')['Mean_Sentiment'].reindex(all_topics, fill_value=0).tolist()
+    fig.add_trace(go.Scatterpolar(
+        r=vals + [vals[0]], theta=all_topics + [all_topics[0]],
+        name=s, line=dict(color=SEASON_COLOURS[s], dash='dot'),
+        fill='none', opacity=0.8
+    ))
+fig.update_layout(
+    polar=dict(radialaxis=dict(visible=True, range=[-1, 1])),
+    title=dict(text='<b>All Segments Radar</b><br><sup>Solid = Traveler Types | Dotted = Seasons</sup>', x=0.5),
+    legend=dict(orientation='h', yanchor='bottom', y=-0.4),
+    margin=dict(t=90, l=60, r=20, b=120)
+)
+fig.write_html('results_cross_segment/Plots/3e_Radar_AllSegments_Combined.html')
+print('  ✓ 3e Combined radar all segments')
+
+
+# 3f. Grouped bar: sentiment per topic, grouped by segment ────────────────────
+#     All 8 segments side-by-side per topic
+tags_for_combined    = tags_sent[['TravelerType', 'Semantic_Label', 'Mean_Sentiment', 'Fragment_Count']].copy()
+tags_for_combined    = tags_for_combined.rename(columns={'TravelerType': 'Segment'})
+seasons_for_combined = seasons_sent[['Season', 'Semantic_Label', 'Mean_Sentiment', 'Fragment_Count']].copy()
+seasons_for_combined = seasons_for_combined.rename(columns={'Season': 'Segment'})
+combined_sent = pd.concat([tags_for_combined, seasons_for_combined], ignore_index=True)
+
+segment_order  = TRAVELER_TYPES + SEASONS
+colour_map_all = {**TRAVELER_COLOURS, **SEASON_COLOURS}
+
+fig = px.bar(
+    combined_sent.sort_values(['Semantic_Label', 'Segment']),
+    x='Semantic_Label', y='Mean_Sentiment', color='Segment',
+    barmode='group',
+    color_discrete_map=colour_map_all,
+    category_orders={'Segment': segment_order},
+    title='<b>Mean Sentiment per Topic — All Segments</b>',
+    labels={'Mean_Sentiment': 'Mean Sentiment (-1 to +1)', 'Semantic_Label': 'Topic'}
+)
+fig.add_hline(y=0, line_dash='dot', opacity=0.3)
+fig.update_layout(
+    xaxis_tickangle=40,
+    height=560, margin=dict(t=80, l=60, r=20, b=180),
+    legend=dict(orientation='h', yanchor='bottom', y=-0.45)
+)
+fig.write_html('results_cross_segment/Plots/3f_GroupedBar_AllSegments_AllTopics.html')
+print('  ✓ 3f Grouped bar all segments × all topics')
+
+
+# 3g. Stacked bar: combined sentiment distribution across all 8 segments ───────
+all_segments = TRAVELER_TYPES + SEASONS
+sent_counts_all = {}
+for tt in TRAVELER_TYPES:
+    vc = tags_doc[tags_doc['TravelerType'] == tt]['Sent_Label'].value_counts()
+    sent_counts_all[tt] = {'Positive': vc.get('Positive', 0), 'Neutral': vc.get('Neutral', 0), 'Negative': vc.get('Negative', 0)}
+for s in SEASONS:
+    vc = seasons_doc[seasons_doc['Season'] == s]['Sent_Label'].value_counts()
+    sent_counts_all[s] = {'Positive': vc.get('Positive', 0), 'Neutral': vc.get('Neutral', 0), 'Negative': vc.get('Negative', 0)}
+
+fig = go.Figure()
+for label, color in bar_spec:
+    fig.add_trace(go.Bar(
+        x=all_segments,
+        y=[sent_counts_all[seg][label] for seg in all_segments],
+        name=label, marker_color=color, opacity=0.85,
+        text=[f"{sent_counts_all[seg][label]:,}" for seg in all_segments],
+        textposition='inside', insidetextanchor='middle',
+    ))
+fig.update_layout(
+    barmode='stack',
+    title=dict(text=f'<b>Sentiment Distribution — All 8 Segments</b><br>'
+                    f'<sup>Left 4 = Traveler Types | Right 4 = Seasons | Threshold ±{POS_THRESHOLD}</sup>'),
+    xaxis_title='Segment', yaxis_title='Number of Fragments',
+    height=540, margin=dict(t=90, l=60, r=20, b=120),
+    legend=dict(orientation='h', yanchor='bottom', y=-0.3)
+)
+fig.add_vline(x=3.5, line_dash='dash', line_color='black', opacity=0.3)
+fig.write_html('results_cross_segment/Plots/3g_StackedBar_AllSegments.html')
+print('  ✓ 3g Stacked bar sentiment distribution all segments')
+
+
+# 3h. Line: per-topic sentiment across seasons, faceted by traveler type ───────
+if not cross_agg.empty:
+    fig = px.line(
+        cross_agg.sort_values('Season'),
+        x='Season', y='Mean_Sentiment', color='Semantic_Label',
+        facet_col='TravelerType', facet_col_wrap=2,
+        markers=True,
+        title='<b>Topic Sentiment Across Seasons — by Traveler Type</b>',
+        labels={'Mean_Sentiment': 'Mean Sentiment', 'Semantic_Label': 'Topic'},
+        hover_data=['Fragment_Count']
+    )
+    fig.add_hline(y=0, line_dash='dot', opacity=0.2)
+    fig.update_yaxes(range=[-1, 1])
+    fig.update_layout(
+        height=700, margin=dict(t=90, l=60, r=20, b=80),
+        legend=dict(orientation='h', yanchor='bottom', y=-0.2)
+    )
+    fig.write_html('results_cross_segment/Plots/3h_FacetLine_TopicBySeason_PerTravelerType.html')
+    print('  ✓ 3h Facet line: topic × season, faceted by traveler type')
+else:
+    print('  ⚠ 3h skipped — no cross-segment data (Person_id overlap required)')
+
+
+print('\n✓ All plots saved to ./results_cross_segment/Plots/')
+print('\nPlot index:')
+print('  Section 1 — Traveler Types:')
+print('    1a  Donut charts (one per traveler type)')
+print('    1b  Heatmap: TravelerType × Topic')
+print('    1c  Bar charts per topic (traveler type ranking)')
+print('    1d  Radar: all traveler types')
+print('    1e  Delta heatmap: traveler type vs overall average')
+print('    1f  Stacked bar: sentiment distribution by traveler type')
+print('    1g  Fragment count per topic by traveler type')
+print('  Section 2 — Seasons:')
+print('    2a  Donut charts (one per season)')
+print('    2b  Heatmap: Season × Topic')
+print('    2c  Bar charts per topic (season ranking)')
+print('    2d  Radar: all seasons')
+print('    2e  Delta heatmap: season vs overall average')
+print('    2f  Stacked bar: sentiment distribution by season')
+print('    2g  Fragment count per topic by season')
+print('  Section 3 — Cross-Segment:')
+print('    3a  Side-by-side heatmap: tags vs seasons')
+print('    3b  Line: overall sentiment by season × traveler type')
+print('    3c  Per-topic heatmap: Season × TravelerType (10 files)')
+print('    3d  Per-topic dot radar: all segments (10 files)')
+print('    3e  Combined radar: all 8 segments overlaid')
+print('    3f  Grouped bar: all segments × all topics')
+print('    3g  Stacked bar: sentiment distribution all 8 segments')
+print('    3h  Facet line: topic × season, per traveler type')
