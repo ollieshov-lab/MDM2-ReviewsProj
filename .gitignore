@@ -1,10 +1,26 @@
-*.pdf
-*.pyc
-*.log
-*.png
-*.aux
-*.csv
+# Local-only data and environment state
 Datasets/
 .venv/
 __pycache__/
 .ipynb_checkpoints/
+code/__pycache__/
+code/**/__pycache__/
+code/**/.ipynb_checkpoints/
+
+# Report build artefacts
+report/*.aux
+report/*.log
+report/*.out
+report/*.pdf
+report/*.toc
+
+# Generated figures
+figures/output_index.html
+figures/hotel_interactive_index.html
+
+# Canonical generated outputs
+outputs/*
+!outputs/README.md
+!outputs/manifests/
+outputs/manifests/*
+!outputs/manifests/.gitkeep
