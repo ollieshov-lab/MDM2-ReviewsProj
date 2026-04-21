@@ -61,21 +61,38 @@ SEASON_ORDER = ["Spring", "Summer", "Autumn", "Winter"]
 
 def add_season(df_in):
     """Add Season and SeasonYear columns derived from Month/Year."""
-    if 'Season' not in df_in.columns or df_in['Season'].isna().all():
-        if 'Month' in df_in.columns:
-            df_in = df_in.copy()
-            df_in['Season'] = df_in['Month'].map(MONTH_TO_SEASON)
-    # Build SeasonYear label e.g. "Spring 2015" for time-series x-axis
-    if 'SeasonYear' not in df_in.columns or df_in['SeasonYear'].isna().all():
-        if 'Season' in df_in.columns and 'Year' in df_in.columns:
-            df_in = df_in.copy() if 'Season' in df_in.columns else df_in
-            df_in['SeasonYear'] = df_in['Season'].astype(str) + ' ' + df_in['Year'].astype(str).str.replace('.0', '', regex=False)
-            # Sort key: year * 4 + season index so we can order chronologically
-            season_idx = {s: i for i, s in enumerate(SEASON_ORDER)}
-            df_in['_SeasonSort'] = (
-                df_in['Year'].fillna(0).astype(int) * 4 +
-                df_in['Season'].map(season_idx).fillna(0).astype(int)
-            )
+    df_in = df_in.copy()
+
+    if 'Season' not in df_in.columns:
+        df_in['Season'] = pd.Series(pd.NA, index=df_in.index, dtype='object')
+    if 'SeasonYear' not in df_in.columns:
+        df_in['SeasonYear'] = pd.Series(pd.NA, index=df_in.index, dtype='object')
+    if '_SeasonSort' not in df_in.columns:
+        df_in['_SeasonSort'] = pd.Series(np.nan, index=df_in.index, dtype='float64')
+
+    if df_in['Season'].isna().all() and 'Month' in df_in.columns:
+        df_in['Season'] = df_in['Month'].map(MONTH_TO_SEASON)
+
+    if 'Year' in df_in.columns:
+        season_idx = {s: i for i, s in enumerate(SEASON_ORDER)}
+        year_values = pd.to_numeric(df_in['Year'], errors='coerce')
+        valid = df_in['Season'].notna() & year_values.notna()
+
+        if valid.any():
+            label_mask = valid & df_in['SeasonYear'].isna()
+            if label_mask.any():
+                year_labels = year_values.loc[label_mask].astype('Int64').astype(str)
+                df_in.loc[label_mask, 'SeasonYear'] = (
+                    df_in.loc[label_mask, 'Season'].astype(str) + ' ' + year_labels
+                )
+
+            sort_mask = valid & df_in['_SeasonSort'].isna()
+            if sort_mask.any():
+                sort_years = year_values.loc[sort_mask].astype(int)
+                df_in.loc[sort_mask, '_SeasonSort'] = (
+                    sort_years * 4 +
+                    df_in.loc[sort_mask, 'Season'].map(season_idx).fillna(0).astype(int)
+                )
     return df_in
 PRIORITY_STYLE = {
     "Strength":                         ("", "STRENGTH"),
@@ -112,8 +129,7 @@ def embed_html(path, height=480):
 
 
 SENTIMENT_FILE = os.path.join(DATA_DIR, "Hotel_Sentiment_Scores.csv")
-RAW_CSV        = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "..", "Datasets", "Hotel_Reviews.csv")
+RAW_CSV        = resolve_repo_path("Datasets/Hotel_Reviews.csv", "code/Hotel_Reviews.csv")
 
 @st.cache_data
 def load_data():
@@ -136,7 +152,10 @@ def load_data():
         df['City'] = df['Hotel_Name'].map(hotel_city_map)
 
     # Pull Month and Year from raw CSV by matching hotel name — pipeline didn't save dates
-    if 'Month' not in df.columns or df['Month'].isna().all():
+    if (
+        'Month' not in df.columns or df['Month'].isna().all() or
+        'Year' not in df.columns or df['Year'].isna().all()
+    ):
         if os.path.exists(RAW_CSV):
             raw = pd.read_csv(RAW_CSV, usecols=[
                 'Hotel_Name', 'Review_Date', 'Reviewer_Score',
