@@ -111,8 +111,9 @@ def embed_html(path, height=480):
     return False
 
 
-SENTIMENT_FILE = DATA_DIR / "Hotel_Sentiment_Scores.csv"
-RAW_CSV        = resolve_repo_path("Datasets/Hotel_Reviews.csv", "code/Hotel_Reviews.csv")
+SENTIMENT_FILE = os.path.join(DATA_DIR, "Hotel_Sentiment_Scores.csv")
+RAW_CSV        = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "..", "Datasets", "Hotel_Reviews.csv")
 
 @st.cache_data
 def load_data():
@@ -222,10 +223,7 @@ def load_data():
 
 
 if not os.path.exists(DOCUMENT_FILE):
-    st.warning(
-        f"Hotel pipeline tables were not found in {HOTEL_PIPELINE_TABLES_REL}. "
-        f"Run {HOTEL_PIPELINE_ENTRYPOINT} first."
-    )
+    st.warning("Run Main_Full_Pipeline.ipynb first to generate the data files.")
     st.stop()
 
 df, benchmark_df, advice_df, corr_df, coords_df = load_data()
@@ -259,7 +257,6 @@ def build_map(coords):
         return None
     sizes = coords['size'].values.astype(float)
     norm_sizes = 8 + 42 * (sizes - sizes.min()) / (sizes.max() - sizes.min() + 1e-9)
-    size_threshold = np.sort(sizes)[-25] if len(sizes) > 25 else 0
 
     fig = go.Figure()
     for category, colour in CATEGORY_COLOURS.items():
@@ -272,6 +269,7 @@ def build_map(coords):
             x=sub['x'], y=sub['y'],
             mode='markers',
             name=category,
+            showlegend=False,
             marker=dict(size=nsub, color=colour, opacity=0.80,
                         line=dict(width=1, color='white')),
             customdata=sub['label'],
@@ -285,20 +283,43 @@ def build_map(coords):
         fig.add_trace(go.Scatter(
             x=other['x'], y=other['y'],
             mode='markers', name='Other',
+            showlegend=False,
             marker=dict(size=o_sizes, color='#90A4AE', opacity=0.5,
                         line=dict(width=0.5, color='white')),
             customdata=other['label'],
             hovertemplate='<b>%{customdata}</b><extra>Other</extra>',
         ))
 
+    # Place category name at the centroid of each cluster
+    label_x, label_y, label_text, label_colours = [], [], [], []
+    for cat, colour in CATEGORY_COLOURS.items():
+        mask = coords['semantic'] == cat
+        if mask.any():
+            label_x.append(coords.loc[mask, 'x'].mean())
+            label_y.append(coords.loc[mask, 'y'].mean())
+            label_text.append(f"<b>{cat}</b>")
+            label_colours.append(colour)
+    fig.add_trace(go.Scatter(
+        x=label_x, y=label_y,
+        mode='text',
+        text=label_text,
+        textfont=dict(size=11, color=label_colours),
+        textposition='middle center',
+        hoverinfo='skip',
+        showlegend=False,
+    ))
+
+    # Tighten axis ranges to actual data with 5% padding
+    xpad = (coords['x'].max() - coords['x'].min()) * 0.05
+    ypad = (coords['y'].max() - coords['y'].min()) * 0.05
     fig.update_layout(
-        height=580,
+        height=700,
         margin=dict(l=20, r=20, t=20, b=20),
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                   range=[coords['x'].min() - xpad, coords['x'].max() + xpad]),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                   range=[coords['y'].min() - ypad, coords['y'].max() + ypad]),
         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-        legend=dict(title='Category', itemsizing='constant',
-                    bgcolor='rgba(0,0,0,0.4)', font=dict(color='white')),
         clickmode='event+select',
     )
     return fig
@@ -468,10 +489,7 @@ def build_detail(semantic_label, hotel_df, benchmark_df, advice_df):
             if embed_html(bench_path, height=400):
                 st.caption(f"Your hotel vs the {hotel_city} city average month by month. The delta bar shows how far above or below you are.")
             else:
-                st.info(
-                    f"Generate {HOTEL_PIPELINE_INTERACTIVE_REL}/DeepDive with "
-                    f"{HOTEL_PIPELINE_ENTRYPOINT} to see the monthly benchmark chart."
-                )
+                st.info("Run the deep dive section of Main_Full_Pipeline.ipynb for this hotel to see the monthly benchmark chart.")
 
         st.divider()
         st.markdown("**Seasonal sentiment**")
@@ -657,10 +675,7 @@ def build_detail(semantic_label, hotel_df, benchmark_df, advice_df):
             else:
                 st.info("No peer data for this city/category.")
         else:
-            st.info(
-                f"Generate {HOTEL_PIPELINE_INTERACTIVE_REL}/DeepDive with "
-                f"{HOTEL_PIPELINE_ENTRYPOINT} to see peer rankings."
-            )
+            st.info("Run the deep dive section of Main_Full_Pipeline.ipynb to see peer rankings.")
 
     # Tab 3: Guest Reviews
     with tab_reviews:
@@ -850,7 +865,7 @@ if not benchmark_df.empty and hotel_city:
         rank = sorted_hotels.index(selected_hotel) + 1
         city_rank_str = f"Rank #{rank} of {len(sorted_hotels)} in {hotel_city}"
 
-parts = [p for p in [score_str, f"Guests are {sent_lbl.lower()}", city_rank_str] if p]
+parts = [p for p in [score_str, city_rank_str] if p]
 st.markdown(
     "<div style='background:rgba(255,255,255,0.07);border-radius:10px;"
     "padding:10px 20px;margin-bottom:8px;font-size:1.05rem'>"
@@ -861,41 +876,71 @@ st.markdown(
 
 if st.session_state.selected is None:
 
-    # Inter-topic distance map + category bar side by side
+    # Full-width inter-topic distance map
     map_fig = build_map(coords_df)
     if map_fig:
-        left, right = st.columns([3, 2])
-        with left:
-            st.markdown("**Topic Map:** what your guests write about")
-            map_event = st.plotly_chart(map_fig, width="stretch",
-                                        on_select="rerun", selection_mode="points",
-                                        key="topic_map")
-            if map_event and map_event.get("selection", {}).get("points"):
-                pt = map_event["selection"]["points"][0]
-                clicked = pt.get("customdata")
-                if clicked and clicked in coords_df['label'].values:
-                    # Map the topic label back to its Semantic_Label for the detail view
-                    row = coords_df[coords_df['label'] == clicked]
-                    semantic = row.iloc[0]['semantic'] if not row.empty else clicked
-                    if semantic in CATEGORIES:
-                        st.session_state.selected = semantic
-                        st.rerun()
-            st.caption("Each bubble is a topic. Bigger = more reviews about it. Click to explore.")
-        with right:
-            st.markdown("**Category sentiment summary** (click a bar to explore)")
-            cat_fig   = build_category_chart(hotel_df)
-            cat_event = st.plotly_chart(cat_fig, width="stretch",
-                                        on_select="rerun", selection_mode="points",
-                                        key="cat_bar")
-            if cat_event and cat_event.get("selection", {}).get("points"):
-                pt = cat_event["selection"]["points"][0]
-                clicked = pt.get("customdata")
-                if clicked:
-                    st.session_state.selected = clicked
+        st.markdown("**Topic Map:** what your guests write about")
+        map_event = st.plotly_chart(map_fig, width="stretch",
+                                    on_select="rerun", selection_mode="points",
+                                    key="topic_map")
+        if map_event and map_event.get("selection", {}).get("points"):
+            pt = map_event["selection"]["points"][0]
+            clicked = pt.get("customdata")
+            if clicked and clicked in coords_df['label'].values:
+                row = coords_df[coords_df['label'] == clicked]
+                semantic = row.iloc[0]['semantic'] if not row.empty else clicked
+                if semantic in CATEGORIES:
+                    st.session_state.selected = semantic
                     st.rerun()
-            st.caption("Positive = guests were happy with it, negative = complaints. Click a bar to see the detail.")
-    else:
-        st.markdown("**Click a category to explore in detail**")
+        st.caption("Each bubble is a topic. Bigger = more reviews about it. Click to explore.")
+
+    st.divider()
+
+    # Radar chart and category bar side by side
+    radar_col, bar_col = st.columns(2)
+
+    with radar_col:
+        st.markdown("**How you compare vs your city across all topics**")
+        h_bench = benchmark_df[benchmark_df['Hotel_Name'] == selected_hotel] if not benchmark_df.empty else pd.DataFrame()
+        if not h_bench.empty:
+            cats         = list(h_bench['Semantic_Label'])
+            hotel_vals   = list(h_bench['Mean_Sentiment'])
+            city_vals    = list(h_bench['City_Mean_Sentiment'])
+            cats_closed  = cats + [cats[0]]
+            hotel_closed = hotel_vals + [hotel_vals[0]]
+            city_closed  = city_vals  + [city_vals[0]]
+
+            r_fig = go.Figure()
+            r_fig.add_trace(go.Scatterpolar(
+                r=city_closed, theta=cats_closed,
+                fill='toself', name='City average',
+                line=dict(color='grey', dash='dot'), opacity=0.4,
+            ))
+            r_fig.add_trace(go.Scatterpolar(
+                r=hotel_closed, theta=cats_closed,
+                fill='toself', name=selected_hotel,
+                line=dict(color='#2196F3', width=2), opacity=0.7,
+            ))
+            r_fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(range=[-1, 1], showticklabels=True),
+                    angularaxis=dict(tickfont=dict(size=11)),
+                ),
+                height=500, margin=dict(l=60, r=60, t=40, b=80),
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                legend=dict(
+                    font=dict(color='white', size=12),
+                    orientation='h',
+                    yanchor='top', y=-0.12,
+                    xanchor='center', x=0.5,
+                ),
+            )
+            r_fig.update_layout(height=500)
+            st.plotly_chart(r_fig, use_container_width=True)
+            st.caption("Blue = your hotel, grey = city average. Bigger blue shape means you're ahead on those topics.")
+
+    with bar_col:
+        st.markdown("**Category sentiment summary** (click a bar to explore)")
         cat_fig   = build_category_chart(hotel_df)
         cat_event = st.plotly_chart(cat_fig, width="stretch",
                                     on_select="rerun", selection_mode="points",
@@ -906,6 +951,7 @@ if st.session_state.selected is None:
             if clicked:
                 st.session_state.selected = clicked
                 st.rerun()
+        st.caption("Positive = guests were happy with it, negative = complaints. Click a bar to see the detail.")
 
     st.divider()
 
@@ -913,10 +959,7 @@ if st.session_state.selected is None:
     with st.expander("Fragment distribution across categories (all hotels)"):
         donut_path = os.path.join(PLOTS_DIR, "Donut_Topic_Distribution.html")
         if not embed_html(donut_path, height=480):
-            st.info(
-                f"Generate {HOTEL_PIPELINE_INTERACTIVE_REL} with "
-                f"{HOTEL_PIPELINE_ENTRYPOINT} to see the donut chart."
-            )
+            st.info("Run Main_Full_Pipeline.ipynb to generate the donut chart.")
 
     # Topic → reviewer score correlation
     if not corr_df.empty:
