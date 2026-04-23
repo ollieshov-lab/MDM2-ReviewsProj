@@ -47,4 +47,4 @@ streamlit run Macro_UI.py
 streamlit run Owner_UI.py
 ```
 
-Both open automatically in your browser at `http://localhost:8501`.
+Both open automatically in your browser at `http://localhost:8501` and `http://localhost:8502`.
